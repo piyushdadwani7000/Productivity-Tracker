@@ -1,0 +1,7 @@
+customtkinter
+pandas
+scikit-learn
+psutil
+pygetwindow
+pywin32
+matplotlib

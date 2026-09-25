@@ -39,8 +39,12 @@ app.add_middleware(
 )
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+if getattr(sys, 'frozen', False):
+    BUNDLE_DIR = sys._MEIPASS
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+STATIC_DIR = os.path.join(BUNDLE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 # Pydantic models for request bodies
@@ -192,6 +196,19 @@ def get_stats_summary(day: Optional[str] = None):
     target_day = day or date.today().isoformat()
     return database.get_daily_summary(target_day)
 
+@app.post("/api/stats/reset")
+def reset_stats():
+    today = date.today().isoformat()
+    database.reset_today_data(today)
+    
+    # Reset in-memory session counters
+    tracker.active_session_time = 0
+    tracker.distraction_duration = 0
+    tracker.window_start_time = time.time()
+    
+    on_dashboard_update()
+    return {"status": "success", "message": "Today's tracking metrics reset to zero."}
+
 @app.get("/api/stats/hourly")
 def get_hourly_stats(day: Optional[str] = None):
     target_day = day or date.today().isoformat()
@@ -307,7 +324,7 @@ def run_server(port: int = 8000, open_browser: bool = True):
     print(f"\n=======================================================")
     print(f"🚀 FocusTracker Web App running at: {url}")
     print(f"=======================================================\n")
-    uvicorn.run("server:app", host="127.0.0.1", port=port, log_level="info", reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 
 if __name__ == "__main__":
     run_server(port=8000, open_browser=True)

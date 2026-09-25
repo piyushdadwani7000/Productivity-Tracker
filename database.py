@@ -363,5 +363,18 @@ def get_hourly_breakdown(date_str):
                 hourly[hour_str]["distraction"] += dur
     return hourly
 
+def reset_today_data(date_str):
+    """Clears all activity logs and resets daily summary for the specified date."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM activity_log WHERE start_time LIKE ?', (f"{date_str}%",))
+    cursor.execute('DELETE FROM daily_summary WHERE date = ?', (date_str,))
+    cursor.execute('''
+        INSERT INTO daily_summary (date, total_active_time, total_distraction_time, total_idle_time)
+        VALUES (?, 0.0, 0.0, 0.0)
+    ''', (date_str,))
+    conn.commit()
+    conn.close()
+
 if __name__ == "__main__":
     init_db()

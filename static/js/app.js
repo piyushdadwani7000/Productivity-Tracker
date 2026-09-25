@@ -40,6 +40,8 @@ const DOM = {
   connText: document.getElementById('connText'),
   toggleTrackingBtn: document.getElementById('toggleTrackingBtn'),
   trackingStatusText: document.getElementById('trackingStatusText'),
+  resetSessionBtn: document.getElementById('resetSessionBtn'),
+
 
   // Live Radar & Rail Guard
   liveAppName: document.getElementById('liveAppName'),
@@ -904,11 +906,35 @@ DOM.toggleTrackingBtn.onclick = async () => {
       const data = await res.json();
       setTrackingButtonState(data.is_running);
       showToast(data.is_running ? 'Monitoring active' : 'Monitoring paused', 'info');
+      if (!data.is_running) {
+        DOM.liveCategoryBadge.className = 'cat-badge cat-idle';
+        DOM.liveCategoryBadge.textContent = '⏸️ PAUSED';
+        DOM.liveAppName.textContent = 'Tracking Paused';
+        DOM.liveWindowTitle.textContent = 'Click Resume in the sidebar to continue tracking';
+      }
     }
   } catch (err) {
     console.error('Error toggling tracker:', err);
   }
 };
+
+if (DOM.resetSessionBtn) {
+  DOM.resetSessionBtn.onclick = async () => {
+    if (confirm("Are you sure you want to reset today's session metrics and activity logs back to zero?")) {
+      try {
+        const res = await fetch('/api/stats/reset', { method: 'POST' });
+        if (res.ok) {
+          showToast("Today's session data reset to zero.", 'info');
+          loadActivities();
+          loadHourlyChartData();
+          updateDashboardMetrics({ total_active_time: 0, total_distraction_time: 0, productive_time: 0, focus_score: 100 });
+        }
+      } catch (err) {
+        console.error('Error resetting session:', err);
+      }
+    }
+  };
+}
 
 // ==========================================================================
 // Tab Navigation & Filter Events

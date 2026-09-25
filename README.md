@@ -4,19 +4,24 @@ FocusTracker is a real-time, low-overhead browser web application that automatic
 
 ---
 
-## 🚀 Getting Started
+### ⚡ Quick Start: One-Click Installer & Standalone EXE
 
-### 1. Install Dependencies
-Make sure you are in the project folder and have your Python environment activated:
+1. **Standalone Executable (.exe)**:
+   - Double-click [`dist/FocusTracker.exe`](file:///c:/Users/piyus/Downloads/Productivity-Tracker-main/Productivity-Tracker/dist/FocusTracker.exe) to start the engine and open the webapp immediately. No Python or terminal required!
+
+2. **Automated Windows Installer**:
+   - Double-click [`Install_FocusTracker.bat`](file:///c:/Users/piyus/Downloads/Productivity-Tracker-main/Productivity-Tracker/Install_FocusTracker.bat).
+   - Automatically sets up all prerequisites, creates a **Desktop & Start Menu shortcut**, and launches the application.
+
+3. **Quick Launcher**:
+   - Run [`run.bat`](file:///c:/Users/piyus/Downloads/Productivity-Tracker-main/Productivity-Tracker/run.bat) anytime to start FocusTracker with auto-fallback to your Python environment.
+
+---
+
+### 🐍 Manual Python Setup (Developers)
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Launch the Web Application
-Simply run:
-
-```bash
 python app.py
 ```
 

@@ -112,13 +112,30 @@ class TrackingEngine:
     def start(self):
         if not self.running:
             self.running = True
+            self.window_start_time = time.time()
+            self.current_window = "Resuming Tracking..."
+            self.current_app = "System"
+            self.current_category = "Idle"
             self.thread = threading.Thread(target=self._run_loop, daemon=True)
             self.thread.start()
+            if self.callback_status_update:
+                self.callback_status_update(self.get_live_state())
 
     def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
+        if self.running:
+            self.running = False
+            self._close_current_window_session()
+            self.current_window = "Tracking Paused"
+            self.current_app = "System"
+            self.current_category = "Idle"
+            self.current_confidence = 1.0
+            self.current_url = ""
+            self.current_snippet = ""
+            self.distraction_duration = 0
+            if self.callback_status_update:
+                self.callback_status_update(self.get_live_state())
+            if self.thread:
+                self.thread.join(timeout=1.0)
 
     def _on_web_inspection_complete(self, target_window: str, inspection_data: dict):
         """Callback invoked when asynchronous 70-word web inspection finishes."""

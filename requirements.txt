@@ -1,7 +1,10 @@
-customtkinter
+fastapi
+uvicorn[standard]
 pandas
 scikit-learn
 psutil
 pygetwindow
 pywin32
-matplotlib
+beautifulsoup4
+uiautomation
+

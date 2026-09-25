@@ -148,10 +148,13 @@ def add_keyword(phrase, category, by_user=True):
         cursor.execute('''
             INSERT INTO keywords (keyword_phrase, category, added_by_user)
             VALUES (?, ?, ?)
-        ''', (phrase.lower(), category, by_user))
+        ''', (phrase.lower().strip(), category, by_user))
         conn.commit()
     except sqlite3.IntegrityError:
-        pass # Already exists
+        cursor.execute('''
+            UPDATE keywords SET category = ?, added_by_user = ? WHERE keyword_phrase = ?
+        ''', (category, by_user, phrase.lower().strip()))
+        conn.commit()
     finally:
         conn.close()
 
@@ -162,6 +165,21 @@ def get_keywords():
     results = cursor.fetchall()
     conn.close()
     return results
+
+def get_keywords_detailed():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, keyword_phrase, category, added_by_user FROM keywords ORDER BY id DESC')
+    results = cursor.fetchall()
+    conn.close()
+    return [{'id': r[0], 'phrase': r[1], 'category': r[2], 'added_by_user': bool(r[3])} for r in results]
+
+def delete_keyword(keyword_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM keywords WHERE id = ?', (keyword_id,))
+    conn.commit()
+    conn.close()
 
 def log_activity(window_title, app_name, category, start_time, end_time, duration, is_split_screen):
     conn = get_connection()
@@ -175,13 +193,56 @@ def log_activity(window_title, app_name, category, start_time, end_time, duratio
     conn.close()
     return activity_id
 
-def log_feedback(activity_id, predicted_label, user_label, confidence):
+def log_feedback(activity_id, predicted_label, user_label, confidence=1.0):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO classification_feedback (activity_id, predicted_label, user_label, confidence, timestamp)
         VALUES (?, ?, ?, ?, ?)
     ''', (activity_id, predicted_label, user_label, confidence, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def update_activity_category(activity_id, new_category):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT window_title, category, duration, start_time FROM activity_log WHERE id = ?', (activity_id,))
+    row = cursor.fetchone()
+    if row:
+        title, old_cat, duration, start_time = row
+        cursor.execute('UPDATE activity_log SET category = ? WHERE id = ?', (new_category, activity_id))
+        conn.commit()
+        # Log feedback
+        log_feedback(activity_id, old_cat, new_category, 1.0)
+        # Add keyword for this title to help future classifications
+        add_keyword(title.lower()[:50], new_category, by_user=True)
+        
+        # Adjust daily summary
+        day_str = start_time.split("T")[0] if "T" in start_time else datetime.now().strftime("%Y-%m-%d")
+        recalculate_daily_summary(day_str)
+    conn.close()
+
+def recalculate_daily_summary(date_str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            SUM(duration),
+            SUM(CASE WHEN category = 'Distraction' THEN duration ELSE 0 END)
+        FROM activity_log
+        WHERE start_time LIKE ?
+    ''', (f"{date_str}%",))
+    row = cursor.fetchone()
+    total_active = (row[0] or 0.0)
+    total_distraction = (row[1] or 0.0)
+
+    cursor.execute('''
+        INSERT INTO daily_summary (date, total_active_time, total_distraction_time)
+        VALUES (?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET
+            total_active_time = excluded.total_active_time,
+            total_distraction_time = excluded.total_distraction_time
+    ''', (date_str, total_active, total_distraction))
     conn.commit()
     conn.close()
 
@@ -192,16 +253,18 @@ def add_task(task_name, date_str):
         INSERT INTO tasks (task_name, planned_date, status, start_time, completion_time, time_spent)
         VALUES (?, ?, 'pending', '', '', 0.0)
     ''', (task_name, date_str))
+    task_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return task_id
 
 def get_tasks(date_str):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, task_name, status, time_spent FROM tasks WHERE planned_date = ?', (date_str,))
+    cursor.execute('SELECT id, task_name, status, time_spent, completion_time FROM tasks WHERE planned_date = ? ORDER BY id DESC', (date_str,))
     results = cursor.fetchall()
     conn.close()
-    return results
+    return [{'id': r[0], 'task_name': r[1], 'status': r[2], 'time_spent': r[3], 'completion_time': r[4]} for r in results]
 
 def update_task_status(task_id, status):
     conn = get_connection()
@@ -211,18 +274,94 @@ def update_task_status(task_id, status):
     conn.commit()
     conn.close()
 
-def get_recent_activities(limit=15):
+def delete_task(task_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+    conn.commit()
+    conn.close()
+
+def get_recent_activities(limit=50):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, window_title, app_name, category, duration, start_time 
+        SELECT id, window_title, app_name, category, duration, start_time, is_split_screen 
         FROM activity_log 
         ORDER BY id DESC 
         LIMIT ?
     ''', (limit,))
     results = cursor.fetchall()
     conn.close()
-    return results
+    return [{
+        'id': r[0],
+        'window_title': r[1],
+        'app_name': r[2],
+        'category': r[3],
+        'duration': r[4],
+        'start_time': r[5],
+        'is_split_screen': bool(r[6])
+    } for r in results]
+
+def get_daily_summary(date_str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT total_active_time, total_distraction_time, total_idle_time, tasks_completed, tasks_planned FROM daily_summary WHERE date = ?', (date_str,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        active = row[0] or 0.0
+        distraction = row[1] or 0.0
+        idle = row[2] or 0.0
+        productive = max(0.0, active - distraction)
+        score = (productive / active * 100.0) if active > 0 else 100.0
+        return {
+            'date': date_str,
+            'total_active_time': active,
+            'total_distraction_time': distraction,
+            'productive_time': productive,
+            'total_idle_time': idle,
+            'focus_score': round(score, 1),
+            'tasks_completed': row[3],
+            'tasks_planned': row[4]
+        }
+    return {
+        'date': date_str,
+        'total_active_time': 0.0,
+        'total_distraction_time': 0.0,
+        'productive_time': 0.0,
+        'total_idle_time': 0.0,
+        'focus_score': 100.0,
+        'tasks_completed': 0,
+        'tasks_planned': 0
+    }
+
+def get_hourly_breakdown(date_str):
+    """Returns productive and distraction duration per hour (00 to 23) for date_str."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            strftime('%H', start_time) as hour,
+            category,
+            SUM(duration) as total_sec
+        FROM activity_log
+        WHERE start_time LIKE ?
+        GROUP BY hour, category
+    ''', (f"{date_str}%",))
+    rows = cursor.fetchall()
+    conn.close()
+
+    hourly = {f"{h:02d}": {"productive": 0.0, "distraction": 0.0} for h in range(24)}
+    for r in rows:
+        hour_str = r[0]
+        cat = r[1]
+        dur = r[2] or 0.0
+        if hour_str in hourly:
+            if cat == "Intended Task":
+                hourly[hour_str]["productive"] += dur
+            elif cat == "Distraction":
+                hourly[hour_str]["distraction"] += dur
+    return hourly
 
 if __name__ == "__main__":
     init_db()

@@ -17,15 +17,15 @@ class SystemMonitor:
         self.idle_threshold = idle_threshold
     
     def get_active_window_info(self):
-        """Returns (window_title, app_name, is_split_screen)"""
+        """Returns (window_title, app_name, is_split_screen, hwnd)"""
         if sys.platform != 'win32':
             # Dummy data for non-Windows dev environments
-            return "Dummy Window Title", "DummyApp.exe", False
+            return "Dummy Window Title", "DummyApp.exe", False, 0
             
         try:
             hwnd = win32gui.GetForegroundWindow()
             if not hwnd:
-                return "Unknown", "Unknown", False
+                return "Unknown", "Unknown", False, 0
                 
             window_title = win32gui.GetWindowText(hwnd)
             
@@ -40,10 +40,10 @@ class SystemMonitor:
             is_split_screen = False
             # This can be expanded based on window geometry (win32gui.GetWindowRect)
             
-            return window_title, app_name, is_split_screen
+            return window_title, app_name, is_split_screen, hwnd
         except Exception as e:
             print(f"Error getting active window: {e}")
-            return "Unknown", "Unknown", False
+            return "Unknown", "Unknown", False, 0
 
     def get_idle_time(self):
         """Returns the number of seconds the system has been idle (no mouse/keyboard input)"""

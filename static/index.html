@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FocusTracker — Intelligent Productivity & AI Distraction Monitor</title>
+  <meta name="description" content="Real-time intelligent productivity monitor and distraction classifier powered by machine learning and native window tracking." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- Chart.js for smooth interactive analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body class="theme-slate">
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Distraction Warning Banner (Overlay) -->
+  <div id="distractionModal" class="modal-backdrop hidden">
+    <div class="modal-card alert-modal">
+      <div class="modal-icon-wrapper pulse-red">
+        <span class="icon">⚠️</span>
+      </div>
+      <h3 class="modal-title">Distraction Detected!</h3>
+      <p id="distractionModalMsg" class="modal-desc">You have spent over 2 minutes on YouTube. Time to get back on track!</p>
+      <div class="modal-actions">
+        <button id="snoozeAlertBtn" class="btn btn-secondary">Snooze (5m)</button>
+        <button id="dismissAlertBtn" class="btn btn-primary">Back to Focus</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚙️ Tracker Settings</h3>
+        <button id="closeSettingsBtn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="idleThresholdInput">System Idle Threshold (<span id="idleThresholdVal">60</span>s)</label>
+          <input type="range" id="idleThresholdInput" min="15" max="300" step="5" value="60" />
+          <small>Seconds of inactivity before status switches to Idle.</small>
+        </div>
+        <div class="form-group">
+          <label for="alertThresholdInput">Distraction Alert Threshold (<span id="alertThresholdVal">30</span>s)</label>
+          <input type="range" id="alertThresholdInput" min="10" max="300" step="5" value="30" />
+          <small>Continuous distraction duration before triggering popup prompt & warning sound.</small>
+        </div>
+        <div class="form-group toggle-group">
+          <label for="soundToggle">Sound Notification Alerts</label>
+          <input type="checkbox" id="soundToggle" checked />
+        </div>
+        <div class="form-group toggle-group">
+          <label for="desktopNotifyToggle">Browser Desktop Notifications</label>
+          <button id="enableNotifyBtn" class="btn btn-sm btn-outline">Enable Notifications</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="saveSettingsBtn" class="btn btn-primary">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-logo">
+          <span class="logo-glow">⚡</span>
+          <div class="brand-text">
+            <h2>FocusTracker</h2>
+            <span class="version-tag">PRO v2.0</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="dashboard">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-tab="activities">
+          <span class="nav-icon">🕒</span>
+          <span>Activity Log</span>
+          <span id="activityCountBadge" class="nav-badge">0</span>
+        </button>
+        <button class="nav-item" data-tab="tasks">
+          <span class="nav-icon">✅</span>
+          <span>Daily Tasks</span>
+          <span id="taskCountBadge" class="nav-badge">0</span>
+        </button>
+        <button class="nav-item" data-tab="keywords">
+          <span class="nav-icon">🏷️</span>
+          <span>ML Keywords</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-status">
+          <span id="connIndicator" class="conn-dot online"></span>
+          <span id="connText">Live Stream</span>
+        </div>
+        <button id="toggleTrackingBtn" class="btn btn-sm btn-control" title="Toggle Active Monitoring">
+          <span class="btn-icon">⏸️</span>
+          <span id="trackingStatusText">Pause</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Navbar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="pageTitle" class="page-title">Dashboard Overview</h1>
+          <p class="page-subtitle" id="currentDateStr">Today's Focus & Activity Analysis</p>
+        </div>
+        <div class="topbar-right">
+          <div class="live-clock-badge">
+            <span class="clock-icon">⏱️</span>
+            <span id="liveClock">00:00:00</span>
+          </div>
+          <button id="openSettingsBtn" class="btn-icon-round" title="Settings">
+            ⚙️
+          </button>
+        </div>
+      </header>
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <!-- Live Window Radar Banner -->
+        <div class="live-banner glass-panel">
+          <div class="live-banner-header">
+            <div class="live-indicator-wrapper">
+              <span class="radar-ping"></span>
+              <span class="live-tag">ACTIVE WINDOW RADAR</span>
+            </div>
+            <div class="live-category-badge-wrapper">
+              <span id="liveCategoryBadge" class="cat-badge cat-idle">INITIALIZING</span>
+              <span id="liveConfidence" class="confidence-pill">99% Conf</span>
+            </div>
+          </div>
+          <div class="live-banner-body">
+            <div class="live-app-avatar" id="liveAppAvatar">⚡</div>
+            <div class="live-window-meta">
+              <div class="live-app-name-row">
+                <span class="live-app-name" id="liveAppName">Detecting active application...</span>
+                <span id="railguardBadge" class="railguard-badge hidden">🛡️ Rail-Guard Overruled</span>
+              </div>
+              <div class="live-window-title" id="liveWindowTitle">Waiting for window focus event...</div>
+            </div>
+            <div class="live-duration-card">
+              <span class="duration-label">Active For</span>
+              <span class="duration-val" id="liveWindowDuration">00:00:00</span>
+            </div>
+          </div>
+
+          <!-- Web Rail Guard 70-Word Inspector Drawer -->
+          <div id="webInspectorCard" class="web-inspector-box hidden">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="inspector-icon">🤖</span>
+                <span class="inspector-title">Web Guard AI Inspector (First 70 Words)</span>
+              </div>
+              <div id="inspectorUrlBadge" class="inspector-url-badge">URL: detecting...</div>
+            </div>
+            <div class="inspector-body">
+              <p id="inspectorSnippetText" class="inspector-snippet">Reading active page content...</p>
+            </div>
+            <div class="inspector-footer">
+              <div id="inspectorKeywordsList" class="inspector-keywords-list">
+                <!-- Matched keywords pills -->
+              </div>
+              <div class="inspector-status-text" id="inspectorStatusText">
+                Analyzed 70 words against misleading content
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Metric Cards -->
+        <div class="metrics-grid">
+          <!-- Card 1: Productive Time -->
+          <div class="metric-card glass-panel card-prod">
+            <div class="metric-header">
+              <span class="metric-title">Productive Time</span>
+              <span class="metric-icon">🎯</span>
+            </div>
+            <div class="metric-val" id="statProductive">0s</div>
+            <div class="metric-footer text-prod">
+              <span>Intended & Work Tasks</span>
+            </div>
+          </div>
+
+          <!-- Card 2: Distraction Time -->
+          <div class="metric-card glass-panel card-dist">
+            <div class="metric-header">
+              <span class="metric-title">Distraction Time</span>
+              <span class="metric-icon">⚠️</span>
+            </div>
+            <div class="metric-val" id="statDistraction">0s</div>
+            <div class="metric-footer text-dist">
+              <span id="distractionPercentage">0% of session</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Total Active Time -->
+          <div class="metric-card glass-panel card-total">
+            <div class="metric-header">
+              <span class="metric-title">Total Active</span>
+              <span class="metric-icon">⚡</span>
+            </div>
+            <div class="metric-val" id="statTotalActive">0s</div>
+            <div class="metric-footer text-muted">
+              <span>Tracked non-idle usage</span>
+            </div>
+          </div>
+
+          <!-- Card 4: Focus Score Gauge -->
+          <div class="metric-card glass-panel card-score">
+            <div class="metric-header">
+              <span class="metric-title">Focus Score</span>
+              <span class="metric-icon">🏆</span>
+            </div>
+            <div class="score-display">
+              <div class="metric-val" id="statFocusScore">100%</div>
+              <div class="score-rating" id="scoreRating">Excellent</div>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="focusScoreBar" style="width: 100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Visual Analytics Row -->
+        <div class="analytics-row">
+          <!-- Left: Doughnut Breakdown -->
+          <div class="chart-card glass-panel">
+            <div class="card-header-flex">
+              <h3>Category Breakdown</h3>
+              <span class="card-subtitle">Productivity Ratio</span>
+            </div>
+            <div class="chart-container doughnut-wrap">
+              <canvas id="categoryChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Right: Hourly Timeline -->
+          <div class="chart-card glass-panel flex-2">
+            <div class="card-header-flex">
+              <h3>24-Hour Productivity Timeline</h3>
+              <span class="card-subtitle">Minutes per Hour</span>
+            </div>
+            <div class="chart-container bar-wrap">
+              <canvas id="hourlyChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity Mini Feed -->
+        <div class="feed-section glass-panel">
+          <div class="feed-header">
+            <h3>⚡ Live Activity Stream</h3>
+            <button class="btn btn-sm btn-outline" id="viewAllActivitiesBtn">View Full Log</button>
+          </div>
+          <div class="activity-table-wrapper">
+            <table class="activity-table" id="dashboardActivityTable">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Application</th>
+                  <th>Window Title</th>
+                  <th>Duration</th>
+                  <th>Time</th>
+                  <th>Feedback Action</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardActivityBody">
+                <tr><td colspan="6" class="text-center text-muted py-4">Loading real-time activities...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: ACTIVITY LOG -->
+      <section id="tab-activities" class="tab-pane">
+        <div class="panel glass-panel">
+          <div class="panel-header-bar">
+            <div>
+              <h2>Full Activity Logs</h2>
+              <p class="text-muted">Review tracked window events and correct classifications to train the AI model.</p>
+            </div>
+            <div class="filter-controls">
+              <input type="text" id="activitySearchInput" class="form-input search-input" placeholder="🔍 Search window or app..." />
+              <div class="btn-group">
+                <button class="btn btn-sm btn-filter active" data-filter="all">All</button>
+                <button class="btn btn-sm btn-filter" data-filter="Intended Task">Tasks</button>
+                <button class="btn btn-sm btn-filter" data-filter="Distraction">Distractions</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="activity-table-wrapper">
+            <table class="activity-table" id="fullActivityTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Category</th>
+                  <th>App Name</th>
+                  <th>Window Title</th>
+                  <th>Duration</th>
+                  <th>Timestamp</th>
+                  <th>Reclassify / Teach AI</th>
+                </tr>
+              </thead>
+              <tbody id="fullActivityBody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: DAILY TASKS -->
+      <section id="tab-tasks" class="tab-pane">
+        <div class="tasks-layout">
+          <!-- Left: Task Form & Progress -->
+          <div class="glass-panel task-control-card">
+            <h2>Today's Focus Tasks</h2>
+            <p class="text-muted">Plan your intended work and stay aligned with your goals.</p>
+
+            <form id="addTaskForm" class="add-task-form">
+              <div class="input-with-button">
+                <input type="text" id="newTaskInput" class="form-input" placeholder="What will you accomplish next?" required />
+                <button type="submit" class="btn btn-primary">Add Task</button>
+              </div>
+            </form>
+
+            <div class="task-progress-card">
+              <div class="progress-info">
+                <span>Task Completion</span>
+                <span id="taskProgressPercent" class="font-bold">0%</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="taskProgressBar" class="progress-bar-fill progress-prod" style="width: 0%;"></div>
+              </div>
+              <div class="task-stats-row">
+                <span id="tasksCompletedCount">0 completed</span>
+                <span id="tasksTotalCount">0 total</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Task List -->
+          <div class="glass-panel task-list-card">
+            <div class="task-list-header">
+              <h3>Task Checklist</h3>
+              <div class="btn-group">
+                <button class="btn btn-sm btn-task-filter active" data-task-filter="all">All</button>
+                <button class="btn btn-sm btn-task-filter" data-task-filter="pending">Pending</button>
+                <button class="btn btn-sm btn-task-filter" data-task-filter="complete">Completed</button>
+              </div>
+            </div>
+            <ul id="taskList" class="task-items-list">
+              <li class="empty-state">No tasks created for today yet. Add one above!</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: ML KEYWORDS -->
+      <section id="tab-keywords" class="tab-pane">
+        <div class="keywords-layout">
+          <!-- Left: Add Keyword -->
+          <div class="glass-panel keyword-form-card">
+            <h2>Machine Learning Keywords</h2>
+            <p class="text-muted">Train the Naive Bayes classifier on app names, websites, and phrases.</p>
+
+            <form id="addKeywordForm" class="add-kw-form">
+              <div class="form-group">
+                <label for="newKwPhrase">Keyword / App Phrase</label>
+                <input type="text" id="newKwPhrase" class="form-input" placeholder="e.g., github, figma, netflix, steam" required />
+              </div>
+              <div class="form-group">
+                <label for="newKwCategory">Classify As</label>
+                <select id="newKwCategory" class="form-select">
+                  <option value="Intended Task">🎯 Intended Task (Productive)</option>
+                  <option value="Distraction">⚠️ Distraction</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary w-full">Add Keyword & Retrain</button>
+            </form>
+
+            <div class="retrain-box">
+              <div class="retrain-info">
+                <h4>Model Status</h4>
+                <p class="text-muted">TF-IDF Vectorizer + Multinomial Naive Bayes</p>
+              </div>
+              <button id="forceRetrainBtn" class="btn btn-secondary w-full">🔄 Force Retrain Model</button>
+            </div>
+          </div>
+
+          <!-- Right: Keywords List -->
+          <div class="glass-panel keyword-list-card">
+            <div class="kw-header-bar">
+              <h3>Active Training Dictionary</h3>
+              <input type="text" id="kwSearchInput" class="form-input search-input" placeholder="Search keywords..." />
+            </div>
+            <div class="keywords-grid" id="keywordsContainer">
+              <!-- Keyword chips dynamically injected -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

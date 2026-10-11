@@ -1,9 +1,34 @@
 /**
- * FocusTracker Pro — Client Application Logic
- * High-performance, real-time WebSocket dashboard for productivity & distraction tracking.
+ * ============================================================================
+ * FocusTracker Pro — Client Single Page Application (app.js)
+ * ============================================================================
+ * Role:
+ *   Drives the entire interactive frontend experience for FocusTracker Pro.
+ *   
+ * Key Modules in this file:
+ *   1. Application State & DOM Element Cache
+ *   2. Utility Formatters & Web Audio Synthesizer (Chimes & Toasts)
+ *   3. WebSocket Real-Time Connection & Message Router (/ws)
+ *   4. Active Window Radar & Live Second-by-Second Ticker
+ *   5. Metric Cards & Dynamic Focus Score Calculation
+ *   6. Chart.js Management (Productivity Ratio Doughnut & 24h Hourly Bar Chart)
+ *   7. Activity Logging Table & Human-in-the-Loop AI Reclassification
+ *   8. Daily Focus Tasks Checklist CRUD & Progress Bar
+ *   9. Machine Learning Keyword Dictionary Management & On-Demand Retraining
+ *   10. Distraction Modal Alerts, Snooze Logic, and Milestone Chimes
+ *   11. Tracker Controls (Pause/Resume, Day Reset) & Settings Modal
+ *   12. Tab Routing & Bootstrap Lifecycle
+ *
+ * Linkages:
+ *   - Consumes WebSocket stream at `ws://localhost:8000/ws` from `server.py`.
+ *   - Sends REST API requests to `/api/*` endpoints hosted by `server.py`.
+ *   - Renders into HTML layout elements defined in `static/index.html`.
+ * ============================================================================
  */
 
-// Application State
+// ----------------------------------------------------------------------------
+// Section 1: Reactive Client Application State
+// ----------------------------------------------------------------------------
 const state = {
   socket: null,
   isConnected: false,
@@ -29,7 +54,9 @@ const state = {
   taskFilter: 'all'
 };
 
-// DOM Elements Cache
+// ----------------------------------------------------------------------------
+// Section 2: Cached DOM Element Lookups
+// ----------------------------------------------------------------------------
 const DOM = {
   // Navigation & Shell
   navItems: document.querySelectorAll('.nav-item'),

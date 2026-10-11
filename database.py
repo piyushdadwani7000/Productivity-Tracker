@@ -1,8 +1,37 @@
+"""
+================================================================================
+FocusTracker Pro — SQLite Database Layer (database.py)
+================================================================================
+Role:
+  Manages persistent storage for FocusTracker using an embedded SQLite database
+  (`tracker.db`). Handles database creation, migrations, CRUD operations,
+  and aggregation queries for daily summaries and 24-hour hourly timelines.
+
+Database Tables:
+  1. `activity_log`: Granular records of active window durations and categories.
+  2. `idle_log`: Log of user idle/inactivity durations.
+  3. `tasks`: Daily planned tasks, completion status, and time spent.
+  4. `breaks`: Scheduled and taken break durations.
+  5. `keywords`: Training dictionary phrases and categories for Naive Bayes ML.
+  6. `daily_summary`: Aggregated rollups per calendar day (active, distraction, idle).
+  7. `classification_feedback`: Audit trail of user reclassifications for model training.
+
+Linkages:
+  - Called by `tracker.py` to record completed window sessions and update daily summaries.
+  - Called by `classifier.py` to load training keywords (`get_keywords`).
+  - Called by `server.py` to service REST endpoints for activities, stats, tasks, and keywords.
+================================================================================
+"""
+
 import sqlite3
 import os
 import sys
 from datetime import datetime
 
+# -----------------------------------------------------------------------------
+# Section 1: Database Path Resolution & Connection Factory
+# -----------------------------------------------------------------------------
+# Handles running both in standard Python and when bundled inside PyInstaller EXE
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -11,13 +40,24 @@ else:
 DB_PATH = os.path.join(BASE_DIR, "tracker.db")
 
 def get_connection():
+    """
+    Creates and returns a new SQLite database connection.
+    Each thread / request creates its own connection for thread-safety.
+    """
     return sqlite3.connect(DB_PATH)
 
+# -----------------------------------------------------------------------------
+# Section 2: Schema Initialization & Seed Data
+# -----------------------------------------------------------------------------
 def init_db():
+    """
+    Creates all required tables if they do not already exist,
+    and seeds initial developer/distraction keywords if table is empty.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Activity Log
+    # 1. Activity Log: Records every window focus transition
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +71,7 @@ def init_db():
         )
     ''')
     
-    # Idle Log
+    # 2. Idle Log: Records periods where user was away from keyboard/mouse
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS idle_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +81,7 @@ def init_db():
         )
     ''')
     
-    # Tasks
+    # 3. Tasks: Daily task checklist
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +94,7 @@ def init_db():
         )
     ''')
     
-    # Breaks
+    # 4. Breaks: User rest periods
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS breaks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +105,7 @@ def init_db():
         )
     ''')
     
-    # Keywords
+    # 5. Keywords: Training corpus for Naive Bayes classifier
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS keywords (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +115,7 @@ def init_db():
         )
     ''')
     
-    # Daily Summary
+    # 6. Daily Summary: Pre-aggregated metrics per calendar day
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS daily_summary (
             date TEXT PRIMARY KEY,
@@ -88,7 +128,7 @@ def init_db():
         )
     ''')
     
-    # Classification Feedback
+    # 7. Classification Feedback: Human-in-the-loop retraining history
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS classification_feedback (
             feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,11 +142,11 @@ def init_db():
     
     conn.commit()
     
-    # Pre-populate some keywords if the table is empty
+    # Seed default keywords if database is new / empty
     cursor.execute('SELECT COUNT(*) FROM keywords')
     if cursor.fetchone()[0] == 0:
         initial_keywords = [
-            # Intended Task keywords (AI / Software Engineering context)
+            # Intended Task keywords (Software engineering & research)
             ('vscode', 'Intended Task', 0),
             ('pycharm', 'Intended Task', 0),
             ('github', 'Intended Task', 0),
@@ -121,7 +161,7 @@ def init_db():
             ('keras', 'Intended Task', 0),
             ('pytorch', 'Intended Task', 0),
             
-            # Distraction keywords
+            # Distraction keywords (Entertainment & social media)
             ('youtube', 'Distraction', 0),
             ('instagram', 'Distraction', 0),
             ('facebook', 'Distraction', 0),
@@ -140,8 +180,17 @@ def init_db():
         
     conn.close()
 
-# Example wrapper functions for common operations
-def add_keyword(phrase, category, by_user=True):
+# -----------------------------------------------------------------------------
+# Section 3: Keyword Operations (Classifier Training Dictionary)
+# -----------------------------------------------------------------------------
+def add_keyword(phrase: str, category: str, by_user: bool = True):
+    """
+    Inserts or updates a keyword phrase and its designated classification.
+    
+    :param phrase: Keyword or application name string (e.g. 'vscode', 'youtube').
+    :param category: Target label ('Intended Task' or 'Distraction').
+    :param by_user: Flag indicating whether added by user action (True) or system default (False).
+    """
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -151,6 +200,7 @@ def add_keyword(phrase, category, by_user=True):
         ''', (phrase.lower().strip(), category, by_user))
         conn.commit()
     except sqlite3.IntegrityError:
+        # Update existing record if phrase already exists
         cursor.execute('''
             UPDATE keywords SET category = ?, added_by_user = ? WHERE keyword_phrase = ?
         ''', (category, by_user, phrase.lower().strip()))
@@ -159,6 +209,9 @@ def add_keyword(phrase, category, by_user=True):
         conn.close()
 
 def get_keywords():
+    """
+    Retrieves all keywords as simple (phrase, category) tuples for model training.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT keyword_phrase, category FROM keywords')
@@ -167,6 +220,9 @@ def get_keywords():
     return results
 
 def get_keywords_detailed():
+    """
+    Retrieves all keywords with IDs and user-origin flags for the frontend management table.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT id, keyword_phrase, category, added_by_user FROM keywords ORDER BY id DESC')
@@ -174,14 +230,25 @@ def get_keywords_detailed():
     conn.close()
     return [{'id': r[0], 'phrase': r[1], 'category': r[2], 'added_by_user': bool(r[3])} for r in results]
 
-def delete_keyword(keyword_id):
+def delete_keyword(keyword_id: int):
+    """
+    Removes a training keyword from the database by its primary key ID.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM keywords WHERE id = ?', (keyword_id,))
     conn.commit()
     conn.close()
 
-def log_activity(window_title, app_name, category, start_time, end_time, duration, is_split_screen):
+# -----------------------------------------------------------------------------
+# Section 4: Activity Logging & Human Feedback Reclassification
+# -----------------------------------------------------------------------------
+def log_activity(window_title: str, app_name: str, category: str, start_time: str, end_time: str, duration: float, is_split_screen: bool) -> int:
+    """
+    Records a completed window focus session into the activity_log table.
+    
+    :returns: Primary key ID of the inserted activity log record.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -193,7 +260,10 @@ def log_activity(window_title, app_name, category, start_time, end_time, duratio
     conn.close()
     return activity_id
 
-def log_feedback(activity_id, predicted_label, user_label, confidence=1.0):
+def log_feedback(activity_id: int, predicted_label: str, user_label: str, confidence: float = 1.0):
+    """
+    Audits human correction of a model prediction into the classification_feedback table.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -203,7 +273,16 @@ def log_feedback(activity_id, predicted_label, user_label, confidence=1.0):
     conn.commit()
     conn.close()
 
-def update_activity_category(activity_id, new_category):
+def update_activity_category(activity_id: int, new_category: str):
+    """
+    Reclassifies an existing logged activity based on user feedback.
+    
+    Side Effects:
+      1. Updates the activity record in `activity_log`.
+      2. Logs feedback into `classification_feedback`.
+      3. Adds the window title as an explicit keyword in `keywords` table.
+      4. Recalculates `daily_summary` totals for that calendar day.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT window_title, category, duration, start_time FROM activity_log WHERE id = ?', (activity_id,))
@@ -212,17 +291,22 @@ def update_activity_category(activity_id, new_category):
         title, old_cat, duration, start_time = row
         cursor.execute('UPDATE activity_log SET category = ? WHERE id = ?', (new_category, activity_id))
         conn.commit()
-        # Log feedback
+        
+        # 1. Audit user feedback
         log_feedback(activity_id, old_cat, new_category, 1.0)
-        # Add keyword for this title to help future classifications
+        
+        # 2. Add keyword for this title to reinforce future ML training
         add_keyword(title.lower()[:50], new_category, by_user=True)
         
-        # Adjust daily summary
+        # 3. Recalculate daily aggregate metrics
         day_str = start_time.split("T")[0] if "T" in start_time else datetime.now().strftime("%Y-%m-%d")
         recalculate_daily_summary(day_str)
     conn.close()
 
-def recalculate_daily_summary(date_str):
+def recalculate_daily_summary(date_str: str):
+    """
+    Recomputes total active time and distraction time for a date by summing activity logs.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -246,7 +330,13 @@ def recalculate_daily_summary(date_str):
     conn.commit()
     conn.close()
 
-def add_task(task_name, date_str):
+# -----------------------------------------------------------------------------
+# Section 5: Task Management Operations
+# -----------------------------------------------------------------------------
+def add_task(task_name: str, date_str: str) -> int:
+    """
+    Adds a new task item to the daily checklist.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -258,7 +348,10 @@ def add_task(task_name, date_str):
     conn.close()
     return task_id
 
-def get_tasks(date_str):
+def get_tasks(date_str: str):
+    """
+    Fetches all tasks created for the specified calendar day.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT id, task_name, status, time_spent, completion_time FROM tasks WHERE planned_date = ? ORDER BY id DESC', (date_str,))
@@ -266,7 +359,10 @@ def get_tasks(date_str):
     conn.close()
     return [{'id': r[0], 'task_name': r[1], 'status': r[2], 'time_spent': r[3], 'completion_time': r[4]} for r in results]
 
-def update_task_status(task_id, status):
+def update_task_status(task_id: int, status: str):
+    """
+    Toggles a task between 'pending' and 'complete', stamping completion timestamp.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE tasks SET status = ?, completion_time = ? WHERE id = ?', 
@@ -274,14 +370,23 @@ def update_task_status(task_id, status):
     conn.commit()
     conn.close()
 
-def delete_task(task_id):
+def delete_task(task_id: int):
+    """
+    Deletes a task by ID.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
     conn.close()
 
-def get_recent_activities(limit=50):
+# -----------------------------------------------------------------------------
+# Section 6: Query Analytics & Summary Reporting
+# -----------------------------------------------------------------------------
+def get_recent_activities(limit: int = 50):
+    """
+    Retrieves the most recent activity log entries ordered by recency.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -302,7 +407,12 @@ def get_recent_activities(limit=50):
         'is_split_screen': bool(r[6])
     } for r in results]
 
-def get_daily_summary(date_str):
+def get_daily_summary(date_str: str):
+    """
+    Returns aggregated metrics for date_str, including:
+      - Productive Time = total_active_time - total_distraction_time
+      - Focus Score (%) = (productive_time / total_active_time) * 100
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT total_active_time, total_distraction_time, total_idle_time, tasks_completed, tasks_planned FROM daily_summary WHERE date = ?', (date_str,))
@@ -335,8 +445,11 @@ def get_daily_summary(date_str):
         'tasks_planned': 0
     }
 
-def get_hourly_breakdown(date_str):
-    """Returns productive and distraction duration per hour (00 to 23) for date_str."""
+def get_hourly_breakdown(date_str: str):
+    """
+    Aggregates productive vs. distraction seconds into 24 one-hour bins (00:00 to 23:00)
+    for rendering the 24-Hour Timeline Bar Chart.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -351,6 +464,7 @@ def get_hourly_breakdown(date_str):
     rows = cursor.fetchall()
     conn.close()
 
+    # Pre-populate all 24 hours of the day
     hourly = {f"{h:02d}": {"productive": 0.0, "distraction": 0.0} for h in range(24)}
     for r in rows:
         hour_str = r[0]
@@ -363,8 +477,11 @@ def get_hourly_breakdown(date_str):
                 hourly[hour_str]["distraction"] += dur
     return hourly
 
-def reset_today_data(date_str):
-    """Clears all activity logs and resets daily summary for the specified date."""
+def reset_today_data(date_str: str):
+    """
+    Clears activity logs and resets the daily metrics record for the given date.
+    Used when user clicks 'Reset Day' in the web interface.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM activity_log WHERE start_time LIKE ?', (f"{date_str}%",))
@@ -376,5 +493,8 @@ def reset_today_data(date_str):
     conn.commit()
     conn.close()
 
+# -----------------------------------------------------------------------------
+# Direct Execution Initialization
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
     init_db()
